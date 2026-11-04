@@ -6,6 +6,8 @@ import com.tienda.pedidos.entity.Pedido;
 import com.tienda.pedidos.exception.RecursoNoEncontradoException;
 import com.tienda.pedidos.repository.PedidoRepository;
 import com.tienda.pedidos.strategy.EstrategiaDescuento;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
@@ -14,6 +16,7 @@ import java.util.Map;
 @Service
 public class PedidoServiceImpl implements PedidoService {
 
+    private static final Logger log = LoggerFactory.getLogger(PedidoServiceImpl.class);
     private static final double TASA_IVA = 0.19;
 
     private final PedidoRepository repo;
@@ -30,14 +33,21 @@ public class PedidoServiceImpl implements PedidoService {
 
     @Override
     public PedidoResponseDTO crear(PedidoRequestDTO dto) {
-        // Aporte propio: un tipo desconocido se normaliza a REGULAR (no se guarda tal cual)
+        log.info("Creando pedido: clienteEmail={}, tipoCliente={}",
+                 dto.getClienteEmail(), dto.getTipoCliente());
+
         String tipo = dto.getTipoCliente().trim().toUpperCase();
         if (!estrategias.containsKey(tipo)) {
+            log.warn("Tipo de cliente desconocido '{}' para clienteEmail={}, se aplica REGULAR",
+                     dto.getTipoCliente(), dto.getClienteEmail());
             tipo = "REGULAR";
         }
         EstrategiaDescuento estrategia = estrategias.get(tipo);
 
         double descuento = estrategia.calcularDescuento(dto.getSubtotal());
+        log.info("Descuento aplicado: clienteEmail={}, tipoCliente={}, descuento={}",
+                 dto.getClienteEmail(), tipo, descuento);
+
         double baseConDescuento = dto.getSubtotal() - descuento;
         double iva = baseConDescuento * TASA_IVA;
         double total = baseConDescuento + iva;
@@ -55,13 +65,17 @@ public class PedidoServiceImpl implements PedidoService {
 
         Pedido guardado = repo.save(pedido);
         notificador.enviarConfirmacion(guardado.getClienteEmail(), guardado.getTotal());
+        log.info("Pedido creado exitosamente con id={}, total={}", guardado.getId(), guardado.getTotal());
         return toResponseDTO(guardado);
     }
 
     @Override
     public PedidoResponseDTO buscarPorId(Long id) {
-        Pedido p = repo.findById(id)
-            .orElseThrow(() -> new RecursoNoEncontradoException("Pedido", id));
+        log.debug("Buscando pedido con id={}", id);
+        Pedido p = repo.findById(id).orElseThrow(() -> {
+            log.warn("Pedido con id={} no encontrado", id);
+            return new RecursoNoEncontradoException("Pedido", id);
+        });
         return toResponseDTO(p);
     }
 
